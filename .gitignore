@@ -1,0 +1,11 @@
+# Budget PWA — privacy
+private/
+*.private.json
+budget-plan-v1.json
+budget-backup-*.json
+*.local-finance.json
+node_modules/
+dist/
+qa-results/
+.env.local
+*.log

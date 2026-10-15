@@ -1,0 +1,89 @@
+name: Deploy Budget to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Privacy guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)(budget-plan-v1\.json$|private/|budget-backup-.*\.json$|.*\.private\.json$|.*\.local-finance\.json$)' >/dev/null; then
+            echo "ERRORE: il repository contiene file che corrispondono ai pattern privati." >&2
+            git ls-files | grep -E '(^|/)(budget-plan-v1\.json$|private/|budget-backup-.*\.json$|.*\.private\.json$|.*\.local-finance\.json$)' >&2 || true
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Resolve GitHub Pages base path
+        shell: bash
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          if [[ "$REPO_NAME" == "${GITHUB_REPOSITORY_OWNER}.github.io" ]]; then
+            echo "BUDGET_BASE=/" >> "$GITHUB_ENV"
+          else
+            echo "BUDGET_BASE=/${REPO_NAME}/" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build production
+        run: npm run build
+
+      - name: Bundle privacy audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find dist -type f \( -name 'budget-plan-v1.json' -o -name 'budget-backup-*.json' -o -name '*.private.json' -o -name '*.local-finance.json' \) | grep -q .; then
+            echo "ERRORE: file privato presente in dist/." >&2
+            find dist -type f \( -name 'budget-plan-v1.json' -o -name 'budget-backup-*.json' -o -name '*.private.json' -o -name '*.local-finance.json' \) >&2
+            exit 1
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
